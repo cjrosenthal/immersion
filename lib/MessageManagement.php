@@ -30,8 +30,17 @@ class MessageManagement {
     }
     
     public static function getThreadContext($threadId, $limit = 20) {
-        // Get recent messages formatted for Claude API
-        $messages = self::getThreadMessages($threadId, $limit);
+        // Get RECENT messages (not oldest) formatted for Claude API
+        $db = Database::getInstance();
+        
+        // Get the last N messages in reverse order, then flip to chronological
+        $messages = $db->fetchAll(
+            "SELECT * FROM messages WHERE thread_id = ? ORDER BY created_at DESC LIMIT ?",
+            [$threadId, $limit]
+        );
+        
+        // Reverse to get chronological order (oldest to newest)
+        $messages = array_reverse($messages);
         
         $context = [];
         foreach ($messages as $message) {
