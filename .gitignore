@@ -1,7 +1,12 @@
-.DS_Store
-node_modules/
-.env
 *.log
-config.local.php
-cache/
+*.sw*
+.DS_Store
+.env
 .user.ini
+/.vscode/*.log
+/vendor/
+activity.log
+cache/
+config.local.php
+node_modules/
+tests/
