@@ -59,9 +59,11 @@ CREATE TABLE IF NOT EXISTS threads (
     name VARCHAR(255) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    last_message_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_user_id (user_id),
-    INDEX idx_created_at (created_at)
+    INDEX idx_created_at (created_at),
+    INDEX idx_last_message_at (last_message_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -69,10 +71,21 @@ CREATE TABLE IF NOT EXISTS messages (
     thread_id INT NOT NULL,
     role ENUM('user', 'assistant') NOT NULL,
     content TEXT NOT NULL,
+    interrupted TINYINT(1) DEFAULT 0,
+    partial_content TEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE,
     INDEX idx_thread_id (thread_id),
-    INDEX idx_created_at (created_at)
+    INDEX idx_created_at (created_at),
+    INDEX idx_thread_created (thread_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_preferences (
+    user_id INT PRIMARY KEY,
+    tts_voice VARCHAR(20) DEFAULT 'alloy',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Insert default data
@@ -80,7 +93,8 @@ INSERT INTO users (email, password_hash, first_name, last_name, is_admin) VALUES
 ('cjrosenthal', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'Admin', 'User', 1)
 ON DUPLICATE KEY UPDATE email=email;
 
--- Default site title setting
+-- Default settings
 INSERT INTO settings (setting_key, setting_value) VALUES
-('site_title', 'Immersion')
+('site_title', 'Immersion'),
+('default_tts_voice', 'alloy')
 ON DUPLICATE KEY UPDATE setting_key=setting_key;

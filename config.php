@@ -46,6 +46,7 @@ $config = [
     ],
     'api' => [
         'claude_key' => '',
+        'claude_model' => 'claude-sonnet-4-6',
         'openai_key' => ''
     ],
     'super_password' => 'super',

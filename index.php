@@ -37,3 +37,4 @@ Header::render('Let\'s chat.');
 <?php
 Footer::render();
 ?>
+<script src="/js/chat.js"></script>

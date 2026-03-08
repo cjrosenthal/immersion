@@ -328,6 +328,60 @@ body {
     padding: 3rem 1rem;
 }
 
+/* Chat Messages */
+.chat-message {
+    margin-bottom: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.chat-message-user {
+    align-items: flex-end;
+}
+
+.chat-message-assistant {
+    align-items: flex-start;
+}
+
+.message-content {
+    max-width: 80%;
+    padding: 1rem 1.25rem;
+    border-radius: 1.25rem;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+    line-height: 1.5;
+}
+
+.chat-message-user .message-content {
+    background-color: #10a37f;
+    color: white;
+    border-bottom-right-radius: 0.25rem;
+}
+
+.chat-message-assistant .message-content {
+    background-color: #f7f7f8;
+    color: #333;
+    border-bottom-left-radius: 0.25rem;
+}
+
+.message-streaming {
+    margin-top: 0.5rem;
+    color: #10a37f;
+    font-size: 1.5rem;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+}
+
 .chat-input-container {
     padding: 1.5rem;
     border-top: 1px solid #e5e5e5;
@@ -359,6 +413,15 @@ body {
 .btn-voice {
     padding: 0.875rem 1.5rem;
     white-space: nowrap;
+}
+
+.btn-interrupt {
+    background-color: #e74c3c;
+    color: white;
+}
+
+.btn-interrupt:hover {
+    background-color: #c0392b;
 }
 
 /* Profile Page */
