@@ -1,0 +1,30 @@
+<?php
+/**
+ * Local Configuration Template
+ * Copy this file to config.local.php and fill in your local values.
+ * config.local.php is gitignored and should never be committed.
+ */
+
+return [
+    'db' => [
+        'host' => 'localhost',
+        'name' => 'immersion',
+        'user' => 'root',
+        'pass' => 'your_password_here',
+        'charset' => 'utf8mb4'
+    ],
+    'smtp' => [
+        'host' => 'smtp.gmail.com',
+        'port' => 587,
+        'username' => 'your_email@gmail.com',
+        'password' => 'your_smtp_password',
+        'from_email' => 'noreply@yourdomain.com',
+        'from_name' => 'Immersion'
+    ],
+    'api' => [
+        'claude_key' => 'your_claude_api_key',
+        'openai_key' => 'your_openai_api_key'
+    ],
+    'super_password' => 'super',
+    'site_url' => 'http://localhost'
+];

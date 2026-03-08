@@ -1,0 +1,13 @@
+# PHP upload limits (for Apache with mod_php)
+php_value upload_max_filesize 25M
+php_value post_max_size 25M
+php_value memory_limit 128M
+php_value max_execution_time 300
+
+# Security: Prevent directory listing
+Options -Indexes
+
+# Rewrite for cleaner URLs (if needed in future)
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+</IfModule>

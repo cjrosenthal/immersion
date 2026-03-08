@@ -2,3 +2,6 @@
 node_modules/
 .env
 *.log
+config.local.php
+cache/
+.user.ini
