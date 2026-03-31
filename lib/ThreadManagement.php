@@ -30,18 +30,7 @@ class ThreadManagement {
     }
     
     public static function getOrCreateCurrentThread($userId) {
-        // Get most recent thread for user
-        $db = Database::getInstance();
-        $thread = $db->fetchOne(
-            "SELECT * FROM threads WHERE user_id = ? ORDER BY last_message_at DESC LIMIT 1",
-            [$userId]
-        );
-        
-        if ($thread) {
-            return $thread;
-        }
-        
-        // Create new thread
+        // Always create a new thread (fresh conversation on page load)
         $threadId = self::createThread($userId, 'New Conversation');
         return self::getThread($threadId);
     }

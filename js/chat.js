@@ -14,6 +14,22 @@ class ChatManager {
         if (form) {
             form.addEventListener('submit', (e) => this.handleSubmit(e));
         }
+        
+        const newChatButton = document.getElementById('newChatButton');
+        if (newChatButton) {
+            newChatButton.addEventListener('click', () => this.startNewChat());
+        }
+        
+        // Get current thread ID from hidden input if present
+        const threadInput = document.getElementById('currentThreadId');
+        if (threadInput && threadInput.value) {
+            this.currentThreadId = threadInput.value;
+        }
+    }
+    
+    startNewChat() {
+        // Redirect to homepage without thread parameter
+        window.location.href = '/';
     }
     
     async handleSubmit(e) {
@@ -263,10 +279,10 @@ class VoiceManager {
             const fullTranscript = finalTranscript.trim();
             
             if (fullTranscript) {
-                // Wait for 1.5 seconds of silence before sending
+                // Wait for 1 second of silence before sending
                 this.silenceTimer = setTimeout(() => {
                     this.sendVoiceMessage(fullTranscript);
-                }, 1500);
+                }, 1000);
             }
         }
     }
