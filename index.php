@@ -83,6 +83,13 @@ Header::render('Let\'s chat.');
                        autocomplete="off">
                 <button type="submit" class="btn btn-primary btn-submit">Send</button>
                 <button type="button" class="btn btn-secondary btn-voice" id="voiceButton">Use Voice</button>
+                <select id="playbackSpeed" class="playback-speed-selector" title="Audio playback speed">
+                    <option value="0.75">🔊 0.75x</option>
+                    <option value="1.0" selected>🔊 1.0x</option>
+                    <option value="1.25">🔊 1.25x</option>
+                    <option value="1.5">🔊 1.5x</option>
+                    <option value="2.0">🔊 2.0x</option>
+                </select>
             </form>
         </div>
     </div>

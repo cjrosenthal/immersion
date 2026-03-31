@@ -498,6 +498,27 @@ body {
     background-color: #c0392b;
 }
 
+.playback-speed-selector {
+    padding: 0.875rem 1rem;
+    border: 1px solid #ddd;
+    border-radius: 0.5rem;
+    font-size: 0.9rem;
+    background-color: white;
+    cursor: pointer;
+    transition: all 0.2s;
+    min-width: 110px;
+}
+
+.playback-speed-selector:hover {
+    border-color: #10a37f;
+}
+
+.playback-speed-selector:focus {
+    outline: none;
+    border-color: #10a37f;
+    box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.1);
+}
+
 /* Profile Page */
 .profile-container {
     max-width: 800px;

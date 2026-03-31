@@ -275,20 +275,37 @@ class VoiceManager {
         this.state = 'off'; // 'off', 'listening', 'speaking'
         this.recognition = null;
         this.audioQueue = [];
+        this.audioBuffer = []; // Pre-generated audio buffer
         this.currentAudio = null;
         this.isPlaying = false;
         this.currentResponseText = '';
         this.spokenText = '';
         this.ttsVoice = 'alloy';
+        this.playbackSpeed = parseFloat(localStorage.getItem('playbackSpeed') || '1.0');
         this.silenceTimer = null;
         this.interimTranscript = '';
         this.accumulatedTranscript = '';
+        this.isGenerating = false; // Track if we're generating audio
     }
     
     init() {
         const voiceButton = document.getElementById('voiceButton');
         if (voiceButton) {
             voiceButton.addEventListener('click', () => this.handleVoiceButtonClick());
+        }
+        
+        // Initialize playback speed selector
+        const speedSelector = document.getElementById('playbackSpeed');
+        if (speedSelector) {
+            // Set initial value from localStorage
+            speedSelector.value = this.playbackSpeed.toString();
+            
+            // Listen for changes
+            speedSelector.addEventListener('change', (e) => {
+                this.playbackSpeed = parseFloat(e.target.value);
+                localStorage.setItem('playbackSpeed', this.playbackSpeed);
+                debugLogger.log('PLAYBACK_SPEED', `Speed changed to ${this.playbackSpeed}x`);
+            });
         }
         
         // Initialize speech recognition
@@ -388,9 +405,12 @@ class VoiceManager {
             debugLogger.log('AUDIO_STOPPED', 'Audio playback stopped by user');
         }
         
-        // Clear audio queue
+        // Clear audio queue and buffer
         this.audioQueue = [];
+        this.audioBuffer.forEach(audio => URL.revokeObjectURL(audio.url));
+        this.audioBuffer = [];
         this.isPlaying = false;
+        this.isGenerating = false;
         
         // Clear any timers
         if (this.silenceTimer) {
@@ -440,16 +460,16 @@ class VoiceManager {
             clearTimeout(this.silenceTimer);
         }
         
-        // Wait for 1.5 seconds of silence before sending
+        // Wait for 1.0 seconds of silence before sending (reduced from 1.5s for faster response)
         // (only if we have accumulated some speech)
         if (this.accumulatedTranscript.trim()) {
-            debugLogger.log('SILENCE_TIMER', 'Waiting for pause (1.5s)');
+            debugLogger.log('SILENCE_TIMER', 'Waiting for pause (1.0s)');
             this.silenceTimer = setTimeout(() => {
                 const messageToSend = this.accumulatedTranscript.trim();
                 if (messageToSend) {
                     this.sendVoiceMessage(messageToSend);
                 }
-            }, 1500);
+            }, 1000);
         }
     }
     
@@ -475,55 +495,25 @@ class VoiceManager {
         }
     }
     
-    async cleanTranscription(rawTranscript) {
-        debugLogger.log('TRANSCRIPTION_CLEANING', 'Formatting transcription with Claude');
+    simpleCleanTranscription(rawTranscript) {
+        // Simple client-side cleaning - fast and effective
+        let cleaned = rawTranscript.trim();
         
-        try {
-            const response = await fetch('/chat_send.php', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    message: `Please clean up this speech-to-text transcription. Fix punctuation, capitalization, remove duplicate words, and add any obviously missing words. Only return the cleaned text, nothing else:\n\n"${rawTranscript}"`,
-                    thread_id: null // Don't save this in thread history
-                })
-            });
-            
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-            let cleanedText = '';
-            
-            while (true) {
-                const {value, done} = await reader.read();
-                if (done) break;
-                
-                buffer += decoder.decode(value, {stream: true});
-                const lines = buffer.split('\n');
-                buffer = lines.pop();
-                
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        const data = JSON.parse(line.substring(6));
-                        if (data.type === 'chunk') {
-                            cleanedText += data.text;
-                        }
-                    }
-                }
-            }
-            
-            // Remove any quotation marks that Claude might have added
-            cleanedText = cleanedText.replace(/^["']|["']$/g, '').trim();
-            
-            debugLogger.log('TRANSCRIPTION_CLEANED', 'Cleaned transcription', cleanedText.substring(0, 50));
-            return cleanedText || rawTranscript; // Fallback to original if cleaning fails
-            
-        } catch (error) {
-            console.error('Error cleaning transcription:', error);
-            debugLogger.log('TRANSCRIPTION_ERROR', 'Failed to clean, using original', error.message);
-            return rawTranscript; // Return original on error
+        // Capitalize first letter
+        if (cleaned.length > 0) {
+            cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
         }
+        
+        // Add period at end if missing punctuation
+        if (cleaned.length > 0 && !/[.!?]$/.test(cleaned)) {
+            cleaned += '.';
+        }
+        
+        // Remove duplicate words (simple check)
+        cleaned = cleaned.replace(/\b(\w+)\s+\1\b/gi, '$1');
+        
+        debugLogger.log('TRANSCRIPTION_CLEANED', 'Simple cleaning applied', cleaned.substring(0, 50));
+        return cleaned;
     }
     
     async sendVoiceMessage(transcript) {
@@ -536,8 +526,8 @@ class VoiceManager {
         // Stop listening
         this.recognition.stop();
         
-        // Clean up the transcription first
-        const cleanedTranscript = await this.cleanTranscription(transcript);
+        // Quick client-side cleaning (no API call delay)
+        const cleanedTranscript = this.simpleCleanTranscription(transcript);
         
         debugLogger.log('MESSAGE_SENT', 'Sending to Claude API (voice)', cleanedTranscript.substring(0, 50) + (cleanedTranscript.length > 50 ? '...' : ''));
         
@@ -548,6 +538,8 @@ class VoiceManager {
         this.state = 'speaking';
         this.currentResponseText = '';
         this.spokenText = '';
+        this.pendingSentences = ''; // Track partial sentences
+        this.hasStartedPlaying = false; // Track if we've started audio
         this.updateUI();
         
         try {
@@ -572,6 +564,12 @@ class VoiceManager {
             const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
             const contentElement = messageElement.querySelector('.message-content');
             
+            // Initialize audio queue for stream-based TTS
+            this.audioQueue = [];
+            this.audioBuffer = [];
+            this.isPlaying = true;
+            this.isGenerating = false;
+            
             while (true) {
                 const {value, done} = await reader.read();
                 if (done) break;
@@ -589,17 +587,34 @@ class VoiceManager {
                             debugLogger.log('THREAD_CREATED', 'New thread', data.thread_id);
                         } else if (data.type === 'chunk') {
                             this.currentResponseText += data.text;
+                            this.pendingSentences += data.text;
                             contentElement.textContent = this.currentResponseText;
                             this.chatManager.scrollToBottom();
+                            
+                            // Check if we have complete sentences to speak
+                            await this.processStreamingSentences(messageId);
+                            
                         } else if (data.type === 'done') {
                             debugLogger.log('RESPONSE_COMPLETE', 'Full response received', this.currentResponseText.substring(0, 50) + '...');
+                            
+                            // Process any remaining text
+                            if (this.pendingSentences.trim()) {
+                                this.audioQueue.push(this.pendingSentences.trim());
+                                this.pendingSentences = '';
+                                await this.fillAudioBuffer();
+                            }
+                            
                             // Remove streaming indicator
                             const streamingIndicator = messageElement.querySelector('.message-streaming');
                             if (streamingIndicator) {
                                 streamingIndicator.remove();
                             }
-                            // Start speaking the response
-                            await this.speakResponse(this.currentResponseText, messageId);
+                            
+                            // If we haven't started playing yet, start now
+                            if (!this.hasStartedPlaying) {
+                                this.hasStartedPlaying = true;
+                                await this.playNextChunk(messageId);
+                            }
                         }
                     }
                 }
@@ -617,27 +632,51 @@ class VoiceManager {
         }
     }
     
+    async processStreamingSentences(messageId) {
+        // Look for complete sentences (ending with . ! ?)
+        const sentenceMatch = this.pendingSentences.match(/[^.!?]+[.!?]+/);
+        
+        if (sentenceMatch) {
+            const completeSentence = sentenceMatch[0];
+            this.pendingSentences = this.pendingSentences.substring(completeSentence.length);
+            
+            debugLogger.log('STREAM_TTS', 'Complete sentence ready for TTS', completeSentence.substring(0, 30) + '...');
+            
+            // Add to queue
+            this.audioQueue.push(completeSentence.trim());
+            
+            // Generate TTS in background
+            await this.fillAudioBuffer();
+            
+            // Start playing if we haven't already
+            if (!this.hasStartedPlaying && this.audioBuffer.length > 0) {
+                this.hasStartedPlaying = true;
+                debugLogger.log('STREAM_TTS', 'Starting audio playback early');
+                await this.playNextChunk(messageId);
+            }
+        }
+    }
+    
     async speakResponse(text, messageId) {
         debugLogger.log('TTS_STARTED', 'Converting response to speech', text.substring(0, 50) + '...');
         
-        // Break into chunks
-        const response = await fetch('/chat_speak.php', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({text: 'CHUNK_TEST', voice: this.ttsVoice})
-        });
-        
         // Use SpeechService to break into chunks (we'll do this client-side)
-        const chunks = this.breakIntoChunks(text);
+        const chunks = this.breakIntoChunks(text, 100); // Increased chunk size for efficiency
         debugLogger.log('TTS_CHUNKS', `Split into ${chunks.length} chunks`);
         
         this.audioQueue = chunks;
+        this.audioBuffer = [];
         this.isPlaying = true;
+        this.isGenerating = false;
         
+        // Pre-generate first 2 chunks to build buffer
+        await this.fillAudioBuffer();
+        
+        // Start playback
         await this.playNextChunk(messageId);
     }
     
-    breakIntoChunks(text, minLength = 50) {
+    breakIntoChunks(text, minLength = 100) {
         const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
         const chunks = [];
         let currentChunk = '';
@@ -657,49 +696,93 @@ class VoiceManager {
         return chunks;
     }
     
+    async fillAudioBuffer() {
+        // Generate up to 1 chunk in advance (reduced from 2 for faster response)
+        const maxBuffer = 1;
+        
+        while (this.audioQueue.length > 0 && this.audioBuffer.length < maxBuffer && !this.isGenerating) {
+            this.isGenerating = true;
+            const chunk = this.audioQueue.shift();
+            
+            try {
+                debugLogger.log('TTS_PREFETCH', 'Pre-generating chunk', chunk.substring(0, 30) + '...');
+                
+                const response = await fetch('/chat_speak.php', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        text: chunk,
+                        voice: this.ttsVoice
+                    })
+                });
+                
+                const audioBlob = await response.blob();
+                const audioUrl = URL.createObjectURL(audioBlob);
+                
+                this.audioBuffer.push({
+                    url: audioUrl,
+                    text: chunk
+                });
+                
+                debugLogger.log('TTS_BUFFERED', `Buffer size: ${this.audioBuffer.length}`);
+                
+            } catch (error) {
+                console.error('Error generating audio chunk:', error);
+                debugLogger.log('TTS_ERROR', 'Error pre-generating chunk', error.message);
+            }
+            
+            this.isGenerating = false;
+        }
+    }
+    
     async playNextChunk(messageId) {
-        if (this.audioQueue.length === 0 || !this.isPlaying) {
-            // Done playing
+        // Check if we have buffered audio or need to wait
+        if (this.audioBuffer.length === 0) {
+            // No buffered audio
+            if (this.audioQueue.length === 0 && !this.isGenerating) {
+                // Truly done
+                this.finishSpeaking(messageId);
+                return;
+            }
+            
+            // Wait for buffer to fill
+            debugLogger.log('AUDIO_WAITING', 'Waiting for buffer to fill...');
+            await new Promise(resolve => setTimeout(resolve, 100));
+            return this.playNextChunk(messageId);
+        }
+        
+        if (!this.isPlaying) {
+            // User stopped playback
             this.finishSpeaking(messageId);
             return;
         }
         
-        const chunk = this.audioQueue.shift();
-        const chunkNum = this.audioQueue.length + 1;
+        // Get next chunk from buffer
+        const audioData = this.audioBuffer.shift();
         
-        try {
-            debugLogger.log('TTS_GENERATING', `Generating audio chunk ${chunkNum}`, chunk.substring(0, 30) + '...');
+        debugLogger.log('AUDIO_PLAYING', `Playing chunk at ${this.playbackSpeed}x speed (buffer: ${this.audioBuffer.length})`);
+        
+        this.currentAudio = new Audio(audioData.url);
+        
+        // Apply playback speed
+        this.currentAudio.playbackRate = this.playbackSpeed;
+        
+        this.currentAudio.onended = () => {
+            URL.revokeObjectURL(audioData.url);
+            debugLogger.log('AUDIO_ENDED', `Chunk finished`);
+            this.spokenText += audioData.text + ' ';
             
-            // Generate audio for this chunk
-            const response = await fetch('/chat_speak.php', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    text: chunk,
-                    voice: this.ttsVoice
-                })
-            });
+            // Refill buffer while playing
+            this.fillAudioBuffer();
             
-            const audioBlob = await response.blob();
-            const audioUrl = URL.createObjectURL(audioBlob);
-            
-            debugLogger.log('AUDIO_PLAYING', `Playing chunk ${chunkNum}`);
-            
-            this.currentAudio = new Audio(audioUrl);
-            this.currentAudio.onended = () => {
-                URL.revokeObjectURL(audioUrl);
-                debugLogger.log('AUDIO_ENDED', `Chunk ${chunkNum} finished`);
-                this.spokenText += chunk + ' ';
-                this.playNextChunk(messageId);
-            };
-            
-            this.currentAudio.play();
-            
-        } catch (error) {
-            console.error('Error playing audio:', error);
-            debugLogger.log('TTS_ERROR', 'Error playing audio', error.message);
-            this.finishSpeaking(messageId);
-        }
+            // Play next chunk
+            this.playNextChunk(messageId);
+        };
+        
+        this.currentAudio.play();
+        
+        // Start generating next chunk in parallel
+        this.fillAudioBuffer();
     }
     
     finishSpeaking(messageId) {
@@ -729,9 +812,12 @@ class VoiceManager {
             this.currentAudio = null;
         }
         
-        // Clear queue
+        // Clear queue and buffer
         this.audioQueue = [];
+        this.audioBuffer.forEach(audio => URL.revokeObjectURL(audio.url));
+        this.audioBuffer = [];
         this.isPlaying = false;
+        this.isGenerating = false;
         
         // Update UI with full response text received (not just what was spoken)
         const messageElement = document.querySelector('[data-message-id]:last-child');
