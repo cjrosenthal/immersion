@@ -68,6 +68,7 @@ class Header {
                                 <a href="/admin/users/list.php">Users</a>
                                 <a href="/admin/threads/list.php">Threads</a>
                                 <a href="/admin/settings.php">Settings</a>
+                                <a href="/admin/debug_test.php">🐛 Debug & Test</a>
                             </div>
                         </div>
                         <?php endif; ?>

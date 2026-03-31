@@ -2,6 +2,120 @@
  * Chat and Voice Management
  */
 
+class DebugLogger {
+    constructor() {
+        this.logs = [];
+        this.maxLogs = 100;
+        this.enabled = localStorage.getItem('debugMode') === 'true';
+    }
+    
+    log(type, message, data = null) {
+        if (!this.enabled) return;
+        
+        const timestamp = new Date().toLocaleTimeString('en-US', { 
+            hour12: false, 
+            hour: '2-digit', 
+            minute: '2-digit', 
+            second: '2-digit',
+            fractionalSecondDigits: 3
+        });
+        
+        const logEntry = {
+            timestamp,
+            type,
+            message,
+            data
+        };
+        
+        this.logs.push(logEntry);
+        
+        // Keep only last maxLogs entries
+        if (this.logs.length > this.maxLogs) {
+            this.logs.shift();
+        }
+        
+        // Display in debug panel
+        this.displayLog(logEntry);
+        
+        // Also log to console for debugging
+        console.log(`[${timestamp}] ${type}: ${message}`, data || '');
+    }
+    
+    displayLog(entry) {
+        const container = document.getElementById('debugLogContainer');
+        if (!container) return;
+        
+        const logDiv = document.createElement('div');
+        logDiv.className = `debug-log-entry debug-log-${this.getLogClass(entry.type)}`;
+        
+        const icon = this.getLogIcon(entry.type);
+        const dataStr = entry.data ? ` | ${JSON.stringify(entry.data).substring(0, 50)}` : '';
+        
+        logDiv.innerHTML = `
+            <span class="debug-log-time">${entry.timestamp}</span>
+            <span class="debug-log-icon">${icon}</span>
+            <span class="debug-log-message">${this.escapeHtml(entry.message)}${dataStr}</span>
+        `;
+        
+        container.appendChild(logDiv);
+        container.scrollTop = container.scrollHeight;
+    }
+    
+    getLogClass(type) {
+        if (type.includes('ERROR')) return 'error';
+        if (type.includes('SPEECH') || type.includes('LISTENING') || type.includes('VOICE')) return 'speech';
+        if (type.includes('TTS') || type.includes('AUDIO')) return 'audio';
+        if (type.includes('API') || type.includes('RESPONSE') || type.includes('MESSAGE')) return 'api';
+        if (type.includes('INTERRUPTED') || type.includes('STOPPED')) return 'warning';
+        return 'info';
+    }
+    
+    getLogIcon(type) {
+        if (type.includes('ERROR')) return '❌';
+        if (type.includes('SPEECH') || type.includes('LISTENING')) return '🎤';
+        if (type.includes('VOICE')) return '🗣️';
+        if (type.includes('TTS') || type.includes('AUDIO')) return '🔊';
+        if (type.includes('API') || type.includes('RESPONSE')) return '💬';
+        if (type.includes('MESSAGE')) return '📤';
+        if (type.includes('INTERRUPTED')) return '⏸️';
+        if (type.includes('STOPPED')) return '⏹️';
+        return 'ℹ️';
+    }
+    
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    clear() {
+        this.logs = [];
+        const container = document.getElementById('debugLogContainer');
+        if (container) {
+            container.innerHTML = '';
+        }
+    }
+    
+    export() {
+        return JSON.stringify(this.logs, null, 2);
+    }
+    
+    toggle() {
+        this.enabled = !this.enabled;
+        localStorage.setItem('debugMode', this.enabled);
+        
+        const sidebar = document.getElementById('debugSidebar');
+        if (sidebar) {
+            sidebar.classList.toggle('active', this.enabled);
+        }
+        
+        return this.enabled;
+    }
+}
+
+// Global debug logger instance
+const debugLogger = new DebugLogger();
+
 class ChatManager {
     constructor() {
         this.currentThreadId = null;
@@ -42,6 +156,8 @@ class ChatManager {
             return;
         }
         
+        debugLogger.log('TEXT_MODE', 'User sent text message', message.substring(0, 50) + (message.length > 50 ? '...' : ''));
+        
         // Clear input
         input.value = '';
         
@@ -54,6 +170,8 @@ class ChatManager {
     
     async sendMessage(message) {
         this.isStreaming = true;
+        
+        debugLogger.log('MESSAGE_SENT', 'Sending to Claude API', message.substring(0, 50) + (message.length > 50 ? '...' : ''));
         
         try {
             // Create assistant message placeholder
@@ -91,13 +209,15 @@ class ChatManager {
                         
                         if (data.type === 'thread_id') {
                             this.currentThreadId = data.thread_id;
+                            debugLogger.log('THREAD_CREATED', 'New thread', data.thread_id);
                         } else if (data.type === 'chunk') {
                             contentElement.textContent += data.text;
                             this.scrollToBottom();
                         } else if (data.type === 'done') {
-                            // Streaming complete
+                            debugLogger.log('RESPONSE_COMPLETE', 'Full response received', contentElement.textContent.substring(0, 50) + '...');
                         } else if (data.type === 'error') {
                             contentElement.textContent = 'Error: ' + data.message;
+                            debugLogger.log('API_ERROR', 'Error from API', data.message);
                         }
                     }
                 }
@@ -105,6 +225,7 @@ class ChatManager {
             
         } catch (error) {
             console.error('Chat error:', error);
+            debugLogger.log('API_ERROR', 'Chat error', error.message);
             alert('Error sending message: ' + error.message);
         } finally {
             this.isStreaming = false;
@@ -161,6 +282,7 @@ class VoiceManager {
         this.ttsVoice = 'alloy';
         this.silenceTimer = null;
         this.interimTranscript = '';
+        this.accumulatedTranscript = '';
     }
     
     init() {
@@ -213,6 +335,8 @@ class VoiceManager {
             return;
         }
         
+        debugLogger.log('VOICE_MODE_STARTED', 'User activated voice mode');
+        
         this.state = 'listening';
         this.updateUI();
         
@@ -226,6 +350,24 @@ class VoiceManager {
     }
     
     stopVoiceMode() {
+        debugLogger.log('VOICE_MODE_STOPPED', 'User deactivated voice mode');
+        
+        // Preserve current response text if we're in the middle of speaking
+        if (this.state === 'speaking' && this.currentResponseText) {
+            const messageElement = document.querySelector('[data-message-id]:last-child');
+            if (messageElement && messageElement.classList.contains('chat-message-assistant')) {
+                const contentElement = messageElement.querySelector('.message-content');
+                if (contentElement) {
+                    contentElement.textContent = this.currentResponseText;
+                }
+                // Remove streaming indicator if present
+                const streamingIndicator = messageElement.querySelector('.message-streaming');
+                if (streamingIndicator) {
+                    streamingIndicator.remove();
+                }
+            }
+        }
+        
         this.state = 'off';
         this.updateUI();
         
@@ -239,6 +381,17 @@ class VoiceManager {
             this.recognition.stop();
         }
         
+        // Stop any currently playing audio
+        if (this.currentAudio) {
+            this.currentAudio.pause();
+            this.currentAudio = null;
+            debugLogger.log('AUDIO_STOPPED', 'Audio playback stopped by user');
+        }
+        
+        // Clear audio queue
+        this.audioQueue = [];
+        this.isPlaying = false;
+        
         // Clear any timers
         if (this.silenceTimer) {
             clearTimeout(this.silenceTimer);
@@ -250,7 +403,9 @@ class VoiceManager {
         if (!this.recognition) return;
         
         this.interimTranscript = '';
+        this.accumulatedTranscript = '';
         this.recognition.start();
+        debugLogger.log('LISTENING_STARTED', 'Microphone activated');
         console.log('Started listening...');
     }
     
@@ -269,26 +424,38 @@ class VoiceManager {
         
         this.interimTranscript = interimTranscript;
         
-        // Clear existing silence timer
+        // Log speech detection
+        if (interimTranscript) {
+            debugLogger.log('SPEECH_DETECTED', 'Interim transcript', interimTranscript.substring(0, 50));
+        }
+        
+        // Accumulate final transcripts
+        if (finalTranscript) {
+            this.accumulatedTranscript += finalTranscript + ' ';
+            debugLogger.log('SPEECH_FINAL', 'Final transcript', finalTranscript.substring(0, 50) + (finalTranscript.length > 50 ? '...' : ''));
+        }
+        
+        // Clear existing silence timer and set a new one
         if (this.silenceTimer) {
             clearTimeout(this.silenceTimer);
         }
         
-        // If we have final transcript, wait for pause then send
-        if (finalTranscript) {
-            const fullTranscript = finalTranscript.trim();
-            
-            if (fullTranscript) {
-                // Wait for 1 second of silence before sending
-                this.silenceTimer = setTimeout(() => {
-                    this.sendVoiceMessage(fullTranscript);
-                }, 1000);
-            }
+        // Wait for 1.5 seconds of silence before sending
+        // (only if we have accumulated some speech)
+        if (this.accumulatedTranscript.trim()) {
+            debugLogger.log('SILENCE_TIMER', 'Waiting for pause (1.5s)');
+            this.silenceTimer = setTimeout(() => {
+                const messageToSend = this.accumulatedTranscript.trim();
+                if (messageToSend) {
+                    this.sendVoiceMessage(messageToSend);
+                }
+            }, 1500);
         }
     }
     
     handleSpeechError(event) {
         console.error('Speech recognition error:', event.error);
+        debugLogger.log('SPEECH_ERROR', 'Recognition error', event.error);
         if (event.error === 'no-speech') {
             // Restart listening
             if (this.state === 'listening') {
@@ -308,12 +475,74 @@ class VoiceManager {
         }
     }
     
+    async cleanTranscription(rawTranscript) {
+        debugLogger.log('TRANSCRIPTION_CLEANING', 'Formatting transcription with Claude');
+        
+        try {
+            const response = await fetch('/chat_send.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    message: `Please clean up this speech-to-text transcription. Fix punctuation, capitalization, remove duplicate words, and add any obviously missing words. Only return the cleaned text, nothing else:\n\n"${rawTranscript}"`,
+                    thread_id: null // Don't save this in thread history
+                })
+            });
+            
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let cleanedText = '';
+            
+            while (true) {
+                const {value, done} = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, {stream: true});
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const data = JSON.parse(line.substring(6));
+                        if (data.type === 'chunk') {
+                            cleanedText += data.text;
+                        }
+                    }
+                }
+            }
+            
+            // Remove any quotation marks that Claude might have added
+            cleanedText = cleanedText.replace(/^["']|["']$/g, '').trim();
+            
+            debugLogger.log('TRANSCRIPTION_CLEANED', 'Cleaned transcription', cleanedText.substring(0, 50));
+            return cleanedText || rawTranscript; // Fallback to original if cleaning fails
+            
+        } catch (error) {
+            console.error('Error cleaning transcription:', error);
+            debugLogger.log('TRANSCRIPTION_ERROR', 'Failed to clean, using original', error.message);
+            return rawTranscript; // Return original on error
+        }
+    }
+    
     async sendVoiceMessage(transcript) {
+        debugLogger.log('LISTENING_STOPPED', 'Sending voice message');
+        debugLogger.log('RAW_TRANSCRIPT', 'Raw speech-to-text', transcript.substring(0, 50) + (transcript.length > 50 ? '...' : ''));
+        
+        // Clear the accumulated transcript
+        this.accumulatedTranscript = '';
+        
         // Stop listening
         this.recognition.stop();
         
-        // Display user message
-        this.chatManager.displayMessage('user', transcript);
+        // Clean up the transcription first
+        const cleanedTranscript = await this.cleanTranscription(transcript);
+        
+        debugLogger.log('MESSAGE_SENT', 'Sending to Claude API (voice)', cleanedTranscript.substring(0, 50) + (cleanedTranscript.length > 50 ? '...' : ''));
+        
+        // Display cleaned user message
+        this.chatManager.displayMessage('user', cleanedTranscript);
         
         // Get response from Claude
         this.state = 'speaking';
@@ -329,7 +558,7 @@ class VoiceManager {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    message: transcript,
+                    message: cleanedTranscript,
                     thread_id: this.chatManager.currentThreadId
                 })
             });
@@ -338,8 +567,10 @@ class VoiceManager {
             const decoder = new TextDecoder();
             let buffer = '';
             
-            // Create message placeholder
-            const messageId = this.chatManager.displayMessage('assistant', '', false);
+            // Create message placeholder with streaming indicator
+            const messageId = this.chatManager.displayMessage('assistant', '', true);
+            const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+            const contentElement = messageElement.querySelector('.message-content');
             
             while (true) {
                 const {value, done} = await reader.read();
@@ -355,9 +586,18 @@ class VoiceManager {
                         
                         if (data.type === 'thread_id') {
                             this.chatManager.currentThreadId = data.thread_id;
+                            debugLogger.log('THREAD_CREATED', 'New thread', data.thread_id);
                         } else if (data.type === 'chunk') {
                             this.currentResponseText += data.text;
+                            contentElement.textContent = this.currentResponseText;
+                            this.chatManager.scrollToBottom();
                         } else if (data.type === 'done') {
+                            debugLogger.log('RESPONSE_COMPLETE', 'Full response received', this.currentResponseText.substring(0, 50) + '...');
+                            // Remove streaming indicator
+                            const streamingIndicator = messageElement.querySelector('.message-streaming');
+                            if (streamingIndicator) {
+                                streamingIndicator.remove();
+                            }
                             // Start speaking the response
                             await this.speakResponse(this.currentResponseText, messageId);
                         }
@@ -367,6 +607,7 @@ class VoiceManager {
             
         } catch (error) {
             console.error('Voice message error:', error);
+            debugLogger.log('API_ERROR', 'Voice message error', error.message);
             alert('Error: ' + error.message);
             this.state = 'listening';
             this.updateUI();
@@ -377,6 +618,8 @@ class VoiceManager {
     }
     
     async speakResponse(text, messageId) {
+        debugLogger.log('TTS_STARTED', 'Converting response to speech', text.substring(0, 50) + '...');
+        
         // Break into chunks
         const response = await fetch('/chat_speak.php', {
             method: 'POST',
@@ -386,6 +629,7 @@ class VoiceManager {
         
         // Use SpeechService to break into chunks (we'll do this client-side)
         const chunks = this.breakIntoChunks(text);
+        debugLogger.log('TTS_CHUNKS', `Split into ${chunks.length} chunks`);
         
         this.audioQueue = chunks;
         this.isPlaying = true;
@@ -421,8 +665,11 @@ class VoiceManager {
         }
         
         const chunk = this.audioQueue.shift();
+        const chunkNum = this.audioQueue.length + 1;
         
         try {
+            debugLogger.log('TTS_GENERATING', `Generating audio chunk ${chunkNum}`, chunk.substring(0, 30) + '...');
+            
             // Generate audio for this chunk
             const response = await fetch('/chat_speak.php', {
                 method: 'POST',
@@ -436,9 +683,12 @@ class VoiceManager {
             const audioBlob = await response.blob();
             const audioUrl = URL.createObjectURL(audioBlob);
             
+            debugLogger.log('AUDIO_PLAYING', `Playing chunk ${chunkNum}`);
+            
             this.currentAudio = new Audio(audioUrl);
             this.currentAudio.onended = () => {
                 URL.revokeObjectURL(audioUrl);
+                debugLogger.log('AUDIO_ENDED', `Chunk ${chunkNum} finished`);
                 this.spokenText += chunk + ' ';
                 this.playNextChunk(messageId);
             };
@@ -447,11 +697,14 @@ class VoiceManager {
             
         } catch (error) {
             console.error('Error playing audio:', error);
+            debugLogger.log('TTS_ERROR', 'Error playing audio', error.message);
             this.finishSpeaking(messageId);
         }
     }
     
     finishSpeaking(messageId) {
+        debugLogger.log('TTS_COMPLETE', 'All audio playback complete');
+        
         this.isPlaying = false;
         
         // Update message with full text
@@ -468,6 +721,8 @@ class VoiceManager {
     }
     
     interrupt() {
+        debugLogger.log('INTERRUPTED', 'User interrupted playback');
+        
         // Stop current audio
         if (this.currentAudio) {
             this.currentAudio.pause();
@@ -478,11 +733,18 @@ class VoiceManager {
         this.audioQueue = [];
         this.isPlaying = false;
         
-        // Update UI with what was spoken so far
+        // Update UI with full response text received (not just what was spoken)
         const messageElement = document.querySelector('[data-message-id]:last-child');
-        if (messageElement) {
+        if (messageElement && messageElement.classList.contains('chat-message-assistant')) {
             const contentElement = messageElement.querySelector('.message-content');
-            contentElement.textContent = this.spokenText.trim();
+            if (contentElement && this.currentResponseText) {
+                contentElement.textContent = this.currentResponseText;
+            }
+            // Remove streaming indicator if present
+            const streamingIndicator = messageElement.querySelector('.message-streaming');
+            if (streamingIndicator) {
+                streamingIndicator.remove();
+            }
         }
         
         // Return to listening
@@ -508,6 +770,114 @@ class VoiceManager {
     }
 }
 
+// Initialize debug controls
+function initDebugControls() {
+    const debugToggle = document.getElementById('debugToggle');
+    const debugClear = document.getElementById('debugClear');
+    const debugExport = document.getElementById('debugExport');
+    const debugSidebar = document.getElementById('debugSidebar');
+    const debugHeader = document.getElementById('debugHeader');
+    const debugResizeHandle = document.getElementById('debugResizeHandle');
+    
+    if (debugToggle) {
+        // Set initial state
+        if (debugLogger.enabled && debugSidebar) {
+            debugSidebar.classList.add('active');
+        }
+        
+        debugToggle.addEventListener('click', () => {
+            const isEnabled = debugLogger.toggle();
+            debugToggle.textContent = isEnabled ? '🐛 Debug (ON)' : '🐛 Debug (OFF)';
+            debugToggle.classList.toggle('active', isEnabled);
+        });
+        
+        // Set button text based on initial state
+        debugToggle.textContent = debugLogger.enabled ? '🐛 Debug (ON)' : '🐛 Debug (OFF)';
+        debugToggle.classList.toggle('active', debugLogger.enabled);
+    }
+    
+    if (debugClear) {
+        debugClear.addEventListener('click', () => {
+            debugLogger.clear();
+        });
+    }
+    
+    if (debugExport) {
+        debugExport.addEventListener('click', () => {
+            const logs = debugLogger.export();
+            navigator.clipboard.writeText(logs).then(() => {
+                alert('Debug logs copied to clipboard!');
+            });
+        });
+    }
+    
+    // Resize functionality
+    if (debugResizeHandle && debugSidebar) {
+        let isResizing = false;
+        let startX = 0;
+        let startWidth = 0;
+        
+        debugResizeHandle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            startX = e.clientX;
+            startWidth = debugSidebar.offsetWidth;
+            debugSidebar.classList.add('dragging');
+            e.preventDefault();
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+            
+            const deltaX = startX - e.clientX;
+            const newWidth = Math.max(250, Math.min(800, startWidth + deltaX));
+            debugSidebar.style.width = newWidth + 'px';
+        });
+        
+        document.addEventListener('mouseup', () => {
+            if (isResizing) {
+                isResizing = false;
+                debugSidebar.classList.remove('dragging');
+            }
+        });
+    }
+    
+    // Drag functionality
+    if (debugHeader && debugSidebar) {
+        let isDragging = false;
+        let startY = 0;
+        let startTop = 0;
+        
+        debugHeader.addEventListener('mousedown', (e) => {
+            // Only drag if clicking on header, not buttons
+            if (e.target.tagName === 'BUTTON' || e.target.closest('.btn-debug-small')) {
+                return;
+            }
+            
+            isDragging = true;
+            startY = e.clientY;
+            startTop = debugSidebar.offsetTop;
+            debugSidebar.classList.add('dragging');
+            e.preventDefault();
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            
+            const deltaY = e.clientY - startY;
+            const newTop = Math.max(0, Math.min(window.innerHeight - 100, startTop + deltaY));
+            debugSidebar.style.top = newTop + 'px';
+            debugSidebar.style.height = (window.innerHeight - newTop) + 'px';
+        });
+        
+        document.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                debugSidebar.classList.remove('dragging');
+            }
+        });
+    }
+}
+
 // Initialize when page loads
 document.addEventListener('DOMContentLoaded', () => {
     const chatManager = new ChatManager();
@@ -515,4 +885,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     const voiceManager = new VoiceManager(chatManager);
     voiceManager.init();
+    
+    // Initialize debug controls if present
+    initDebugControls();
 });

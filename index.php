@@ -11,6 +11,10 @@ require_once BASE_PATH . '/lib/ThreadManagement.php';
 require_once BASE_PATH . '/lib/MessageManagement.php';
 
 $userId = SessionManagement::getUserId();
+$userInfo = require_once BASE_PATH . '/lib/UserManagement.php';
+$currentUser = UserManagement::getUserById($userId);
+$isAdmin = $currentUser['is_admin'] ?? false;
+
 $currentThreadId = $_GET['thread'] ?? null;
 $currentThread = null;
 $messages = [];
@@ -83,6 +87,26 @@ Header::render('Let\'s chat.');
         </div>
     </div>
 </div>
+
+<?php if ($isAdmin): ?>
+<!-- Debug Sidebar (Admin Only) -->
+<div class="debug-sidebar" id="debugSidebar">
+    <div class="debug-resize-handle" id="debugResizeHandle" title="Drag to resize"></div>
+    <div class="debug-header" id="debugHeader">
+        <h3>🐛 Debug Console</h3>
+        <div class="debug-controls">
+            <button type="button" class="btn-debug-small" id="debugClear" title="Clear logs">🗑️</button>
+            <button type="button" class="btn-debug-small" id="debugExport" title="Export logs">📋</button>
+        </div>
+    </div>
+    <div class="debug-log-container" id="debugLogContainer">
+        <!-- Debug logs will appear here -->
+    </div>
+</div>
+
+<!-- Debug Toggle Button (Admin Only) -->
+<button type="button" class="debug-toggle-btn" id="debugToggle">🐛 Debug (OFF)</button>
+<?php endif; ?>
 
 <?php
 Footer::render();
